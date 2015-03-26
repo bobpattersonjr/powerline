@@ -1,28 +1,37 @@
 {
-	"segments": {
-		"right": [
-			{
-				"function": "powerline.segments.common.sys.uptime",
-				"priority": 50
-			},
-			{
-				"function": "powerline.segments.common.sys.system_load",
-				"priority": 50
-			},
-			{
-				"function": "powerline.segments.common.time.date"
-			},
-			{
-				"function": "powerline.segments.common.time.date",
-				"name": "time",
-				"args": {
-					"format": "%H:%M",
-					"istime": true
-				}
-			},
-			{
-				"function": "powerline.segments.common.net.hostname"
-			}
-		]
-	}
+    "segments": {
+        "right": [
+            {
+                "function": "powerline.segments.common.sys.uptime",
+                "priority": 50
+            },
+            {
+                "function": "powerline.segments.common.sys.system_load",
+                "priority": 50
+            },
+                {
+                "function":"powerline.segments.common.wthr.weather",
+                "args":{
+                "unit":"F",
+                "location_query":"Hoboken, NJ"
+                }
+            },
+            {
+                "function": "powerline.segments.common.time.date",
+                "args":{ "format":"%m/%d/%Y"}
+            },
+            {
+                "function": "powerline.segments.common.time.date",
+                "name": "time",
+                "args": {
+                    "format": "%I:%M",
+                    "istime": true
+                }
+            },
+            {
+                "function": "powerline.segments.common.net.hostname",
+                "args": {"exclude_domain":true}
+            }
+        ]
+    }
 }
