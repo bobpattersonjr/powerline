@@ -24,7 +24,7 @@
                 "function": "powerline.segments.common.time.date",
                 "name": "time",
                 "args": {
-                    "format": "%I:%M",
+                    "format": "%I:%M%p",
                     "istime": true
                 }
             },
