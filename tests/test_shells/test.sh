@@ -188,9 +188,11 @@ ln -s "$(which mktemp)" tests/shell/path
 ln -s "$(which grep)" tests/shell/path
 ln -s "$(which sed)" tests/shell/path
 ln -s "$(which rm)" tests/shell/path
+ln -s "$(which tr)" tests/shell/path
 ln -s "$(which uname)" tests/shell/path
 ln -s "$(which test)" tests/shell/path
 ln -s "$(which pwd)" tests/shell/path
+ln -s "$(which hostname)" tests/shell/path
 ln -s ../../test_shells/bgscript.sh tests/shell/path
 ln -s ../../test_shells/waitpid.sh tests/shell/path
 if which socat ; then
@@ -367,6 +369,9 @@ if test -z "${ONLY_SHELL}" || test "x${ONLY_SHELL%sh}" != "x${ONLY_SHELL}" || te
 				SH="${TEST_COMMAND%% *}"
 				# dash tests are not stable, see #931
 				if test x$FAST$SH = x1dash ; then
+					continue
+				fi
+				if test x$FAST$SH = x1fish ; then
 					continue
 				fi
 				if test "x$ONLY_SHELL" != "x" && test "x$ONLY_SHELL" != "x$SH" ; then
