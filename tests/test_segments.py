@@ -7,6 +7,7 @@ import os
 from functools import partial
 from collections import namedtuple
 from time import sleep
+from platform import python_implementation
 
 from powerline.segments import shell, tmux, pdb, i3wm
 from powerline.lib.vcs import get_fallback_create_watcher
@@ -397,6 +398,29 @@ class TestNet(TestCommon):
 			interfaces[:] = ()
 			self.assertEqual(self.module.internal_ip(pl=pl, ipv=6), None)
 
+		gateways = {
+			'default': {
+				netifaces.AF_INET: ('192.168.100.1', 'enp2s0'),
+				netifaces.AF_INET6: ('feff::5446:5eff:fe5a:0001', 'enp2s0')
+			}
+		}
+
+		with replace_module_module(
+			self.module, 'netifaces',
+			interfaces=(lambda: interfaces),
+			ifaddresses=(lambda interface: addr[interface]),
+			gateways=(lambda: gateways),
+			AF_INET=netifaces.AF_INET,
+			AF_INET6=netifaces.AF_INET6,
+		):
+			# default gateway has specified address family
+			self.assertEqual(self.module.internal_ip(pl=pl, interface='default_gateway', ipv=4), '192.168.100.200')
+			self.assertEqual(self.module.internal_ip(pl=pl, interface='default_gateway', ipv=6), 'feff::5446:5eff:fe5a:7777%enp2s0')
+			# default gateway doesn't have specified address family
+			gateways['default'] = {}
+			self.assertEqual(self.module.internal_ip(pl=pl, interface='default_gateway', ipv=4), None)
+			self.assertEqual(self.module.internal_ip(pl=pl, interface='default_gateway', ipv=6), None)
+
 	def test_network_load(self):
 		def gb(interface):
 			return None
@@ -686,6 +710,12 @@ class TestTime(TestCommon):
 		with replace_attr(self.module, 'datetime', Args(now=lambda: Args(strftime=lambda fmt: fmt))):
 			self.assertEqual(self.module.date(pl=pl), [{'contents': '%Y-%m-%d', 'highlight_groups': ['date'], 'divider_highlight_group': None}])
 			self.assertEqual(self.module.date(pl=pl, format='%H:%M', istime=True), [{'contents': '%H:%M', 'highlight_groups': ['time', 'date'], 'divider_highlight_group': 'time:divider'}])
+		unicode_date = self.module.date(pl=pl, format='\u231a', istime=True)
+		expected_unicode_date = [{'contents': '\u231a', 'highlight_groups': ['time', 'date'], 'divider_highlight_group': 'time:divider'}]
+		if python_implementation() == 'PyPy' and sys.version_info >= (3,):
+			if unicode_date != expected_unicode_date:
+				raise SkipTest('Dates do not match, see https://bitbucket.org/pypy/pypy/issues/2161/pypy3-strftime-does-not-accept-unicode')
+		self.assertEqual(unicode_date, expected_unicode_date)
 
 	def test_fuzzy_time(self):
 		time = Args(hour=0, minute=45)
@@ -819,10 +849,10 @@ class TestI3WM(TestCase):
 	def test_workspaces(self):
 		pl = Pl()
 		with replace_attr(i3wm, 'conn', Args(get_workspaces=lambda: iter([
-			{'name': '1: w1', 'focused': False, 'urgent': False, 'visible': False},
-			{'name': '2: w2', 'focused': False, 'urgent': False, 'visible': True},
-			{'name': '3: w3', 'focused': False, 'urgent': True, 'visible': True},
-			{'name': '4: w4', 'focused': True, 'urgent': True, 'visible': True},
+			{'name': '1: w1', 'output': 'LVDS1', 'focused': False, 'urgent': False, 'visible': False},
+			{'name': '2: w2', 'output': 'LVDS1', 'focused': False, 'urgent': False, 'visible': True},
+			{'name': '3: w3', 'output': 'HDMI1', 'focused': False, 'urgent': True, 'visible': True},
+			{'name': '4: w4', 'output': 'DVI01', 'focused': True, 'urgent': True, 'visible': True},
 		]))):
 			self.assertEqual(i3wm.workspaces(pl=pl), [
 				{'contents': '1: w1', 'highlight_groups': ['workspace']},
@@ -849,6 +879,15 @@ class TestI3WM(TestCase):
 				{'contents': 'w2', 'highlight_groups': ['w_visible', 'workspace']},
 				{'contents': 'w3', 'highlight_groups': ['w_urgent', 'w_visible', 'workspace']},
 				{'contents': 'w4', 'highlight_groups': ['w_focused', 'w_urgent', 'w_visible', 'workspace']},
+			])
+			self.assertEqual(i3wm.workspaces(pl=pl, only_show=['focused', 'urgent'], output='DVI01'), [
+				{'contents': '4: w4', 'highlight_groups': ['w_focused', 'w_urgent', 'w_visible', 'workspace']},
+			])
+			self.assertEqual(i3wm.workspaces(pl=pl, only_show=['visible'], output='HDMI1'), [
+				{'contents': '3: w3', 'highlight_groups': ['w_urgent', 'w_visible', 'workspace']},
+			])
+			self.assertEqual(i3wm.workspaces(pl=pl, only_show=['visible'], strip=3, output='LVDS1'), [
+				{'contents': 'w2', 'highlight_groups': ['w_visible', 'workspace']},
 			])
 
 	def test_mode(self):
@@ -881,12 +920,12 @@ class TestBat(TestCommon):
 	def test_battery(self):
 		pl = Pl()
 
-		def _get_capacity(pl):
-			return 86
+		def _get_battery_status(pl):
+			return 86, False
 
-		with replace_attr(self.module, '_get_capacity', _get_capacity):
+		with replace_attr(self.module, '_get_battery_status', _get_battery_status):
 			self.assertEqual(self.module.battery(pl=pl), [{
-				'contents': '86%',
+				'contents': '  86%',
 				'highlight_groups': ['battery_gradient', 'battery'],
 				'gradient_level': 14,
 			}])
@@ -896,11 +935,17 @@ class TestBat(TestCommon):
 				'gradient_level': 14,
 			}])
 			self.assertEqual(self.module.battery(pl=pl, steps=7), [{
-				'contents': '86%',
+				'contents': '  86%',
 				'highlight_groups': ['battery_gradient', 'battery'],
 				'gradient_level': 14,
 			}])
 			self.assertEqual(self.module.battery(pl=pl, gamify=True), [
+				{
+					'contents': ' ',
+					'draw_inner_divider': False,
+					'highlight_groups': ['battery_offline', 'battery_ac_state', 'battery_gradient', 'battery'],
+					'gradient_level': 0
+				},
 				{
 					'contents': 'OOOO',
 					'draw_inner_divider': False,
@@ -916,6 +961,12 @@ class TestBat(TestCommon):
 			])
 			self.assertEqual(self.module.battery(pl=pl, gamify=True, full_heart='+', empty_heart='-', steps='10'), [
 				{
+					'contents': ' ',
+					'draw_inner_divider': False,
+					'highlight_groups': ['battery_offline', 'battery_ac_state', 'battery_gradient', 'battery'],
+					'gradient_level': 0
+				},
+				{
 					'contents': '++++++++',
 					'draw_inner_divider': False,
 					'highlight_groups': ['battery_full', 'battery_gradient', 'battery'],
@@ -928,6 +979,34 @@ class TestBat(TestCommon):
 					'gradient_level': 100
 				}
 			])
+
+	def test_battery_with_ac_online(self):
+		pl = Pl()
+
+		def _get_battery_status(pl):
+			return 86, True
+
+		with replace_attr(self.module, '_get_battery_status', _get_battery_status):
+			self.assertEqual(self.module.battery(pl=pl, online='C', offline=' '), [
+				{
+					'contents': 'C 86%',
+					'highlight_groups': ['battery_gradient', 'battery'],
+					'gradient_level': 14,
+				}])
+
+	def test_battery_with_ac_offline(self):
+		pl = Pl()
+
+		def _get_battery_status(pl):
+			return 86, False
+
+		with replace_attr(self.module, '_get_battery_status', _get_battery_status):
+			self.assertEqual(self.module.battery(pl=pl, online='C', offline=' '), [
+				{
+					'contents': '  86%',
+					'highlight_groups': ['battery_gradient', 'battery'],
+					'gradient_level': 14,
+				}])
 
 
 class TestVim(TestCase):
