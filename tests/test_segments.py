@@ -496,15 +496,15 @@ class TestEnv(TestCommon):
 				pass
 
 			def username(self):
-				return 'def'
+				return 'def@DOMAIN.COM'
 
 			if hasattr(self.module, 'psutil') and not callable(self.module.psutil.Process.username):
 				username = property(username)
 
 		struct_passwd = namedtuple('struct_passwd', ('pw_name',))
 		new_psutil = new_module('psutil', Process=Process)
-		new_pwd = new_module('pwd', getpwuid=lambda uid: struct_passwd(pw_name='def'))
-		new_getpass = new_module('getpass', getuser=lambda: 'def')
+		new_pwd = new_module('pwd', getpwuid=lambda uid: struct_passwd(pw_name='def@DOMAIN.COM'))
+		new_getpass = new_module('getpass', getuser=lambda: 'def@DOMAIN.COM')
 		pl = Pl()
 		with replace_attr(self.module, 'pwd', new_pwd):
 			with replace_attr(self.module, 'getpass', new_getpass):
@@ -512,12 +512,18 @@ class TestEnv(TestCommon):
 					with replace_attr(self.module, 'psutil', new_psutil):
 						with replace_attr(self.module, '_geteuid', lambda: 5):
 							self.assertEqual(self.module.user(pl=pl), [
-								{'contents': 'def', 'highlight_groups': ['user']}
+								{'contents': 'def@DOMAIN.COM', 'highlight_groups': ['user']}
 							])
 							self.assertEqual(self.module.user(pl=pl, hide_user='abc'), [
+								{'contents': 'def@DOMAIN.COM', 'highlight_groups': ['user']}
+							])
+							self.assertEqual(self.module.user(pl=pl, hide_domain=False), [
+								{'contents': 'def@DOMAIN.COM', 'highlight_groups': ['user']}
+							])
+							self.assertEqual(self.module.user(pl=pl, hide_user='def@DOMAIN.COM'), None)
+							self.assertEqual(self.module.user(pl=pl, hide_domain=True), [
 								{'contents': 'def', 'highlight_groups': ['user']}
 							])
-							self.assertEqual(self.module.user(pl=pl, hide_user='def'), None)
 						with replace_attr(self.module, '_geteuid', lambda: 0):
 							self.assertEqual(self.module.user(pl=pl), [
 								{'contents': 'def', 'highlight_groups': ['superuser', 'user']}
@@ -626,8 +632,39 @@ class TestEnv(TestCommon):
 		pl = Pl()
 		with replace_env('VIRTUAL_ENV', '/abc/def/ghi') as segment_info:
 			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info), 'ghi')
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_conda=True), 'ghi')
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_venv=True), None)
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_venv=True, ignore_conda=True), None)
+
 			segment_info['environ'].pop('VIRTUAL_ENV')
 			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info), None)
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_conda=True), None)
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_venv=True), None)
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_venv=True, ignore_conda=True), None)
+
+		with replace_env('CONDA_DEFAULT_ENV', 'foo') as segment_info:
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info), 'foo')
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_conda=True), None)
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_venv=True), 'foo')
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_venv=True, ignore_conda=True), None)
+
+			segment_info['environ'].pop('CONDA_DEFAULT_ENV')
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info), None)
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_conda=True), None)
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_venv=True), None)
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_venv=True, ignore_conda=True), None)
+
+		with replace_env('CONDA_DEFAULT_ENV', 'foo', environ={'VIRTUAL_ENV': '/sbc/def/ghi'}) as segment_info:
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info), 'ghi')
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_conda=True), 'ghi')
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_venv=True), 'foo')
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_venv=True, ignore_conda=True), None)
+
+			segment_info['environ'].pop('CONDA_DEFAULT_ENV')
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info), 'ghi')
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_conda=True), 'ghi')
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_venv=True), None)
+			self.assertEqual(self.module.virtualenv(pl=pl, segment_info=segment_info, ignore_venv=True, ignore_conda=True), None)
 
 	def test_environment(self):
 		pl = Pl()
@@ -700,6 +737,29 @@ class TestVcs(TestCommon):
 					'contents': 'tests',
 					'divider_highlight_group': None
 				}])
+
+	def test_stash(self):
+		pl = Pl()
+		create_watcher = get_fallback_create_watcher()
+		stash = partial(self.module.stash, pl=pl, create_watcher=create_watcher, segment_info={'getcwd': os.getcwd})
+
+		def forge_stash(n):
+		    return replace_attr(self.module, 'guess', get_dummy_guess(stash=lambda: n, directory='/tmp/tests'))
+
+		with forge_stash(0):
+			self.assertEqual(stash(), None)
+		with forge_stash(1):
+			self.assertEqual(stash(), [{
+				'highlight_groups': ['stash'],
+				'contents': '1',
+				'divider_highlight_group': None
+			}])
+		with forge_stash(2):
+			self.assertEqual(stash(), [{
+				'highlight_groups': ['stash'],
+				'contents': '2',
+				'divider_highlight_group': None
+			}])
 
 
 class TestTime(TestCommon):
@@ -774,6 +834,12 @@ class TestSys(TestCommon):
 					{'contents': '4 ', 'highlight_groups': ['system_load_gradient', 'system_load'], 'divider_highlight_group': 'background:divider', 'gradient_level': 100},
 					{'contents': '2', 'highlight_groups': ['system_load_gradient', 'system_load'], 'divider_highlight_group': 'background:divider', 'gradient_level': 75.0}
 				])
+				self.assertEqual(self.module.system_load(pl=pl, short=True), [
+					{'contents': '7.5', 'highlight_groups': ['system_load_gradient', 'system_load'], 'divider_highlight_group': 'background:divider', 'gradient_level': 100},
+				])
+				self.assertEqual(self.module.system_load(pl=pl, format='{avg:.0f}', threshold_good=0, threshold_bad=1, short=True), [
+					{'contents': '8', 'highlight_groups': ['system_load_gradient', 'system_load'], 'divider_highlight_group': 'background:divider', 'gradient_level': 100},
+				])
 
 	def test_cpu_load_percent(self):
 		try:
@@ -846,48 +912,84 @@ class TestWthr(TestCommon):
 
 
 class TestI3WM(TestCase):
-	def test_workspaces(self):
-		pl = Pl()
-		with replace_attr(i3wm, 'conn', Args(get_workspaces=lambda: iter([
+	@staticmethod
+	def get_workspaces():
+		return iter([
 			{'name': '1: w1', 'output': 'LVDS1', 'focused': False, 'urgent': False, 'visible': False},
 			{'name': '2: w2', 'output': 'LVDS1', 'focused': False, 'urgent': False, 'visible': True},
 			{'name': '3: w3', 'output': 'HDMI1', 'focused': False, 'urgent': True, 'visible': True},
 			{'name': '4: w4', 'output': 'DVI01', 'focused': True, 'urgent': True, 'visible': True},
-		]))):
-			self.assertEqual(i3wm.workspaces(pl=pl), [
+		])
+
+	def test_workspaces(self):
+		pl = Pl()
+		with replace_attr(i3wm, 'get_i3_connection', lambda: Args(get_workspaces=self.get_workspaces)):
+			segment_info = {}
+
+			self.assertEqual(i3wm.workspaces(pl=pl, segment_info=segment_info), [
 				{'contents': '1: w1', 'highlight_groups': ['workspace']},
 				{'contents': '2: w2', 'highlight_groups': ['w_visible', 'workspace']},
 				{'contents': '3: w3', 'highlight_groups': ['w_urgent', 'w_visible', 'workspace']},
 				{'contents': '4: w4', 'highlight_groups': ['w_focused', 'w_urgent', 'w_visible', 'workspace']},
 			])
-			self.assertEqual(i3wm.workspaces(pl=pl, only_show=None), [
+			self.assertEqual(i3wm.workspaces(pl=pl, segment_info=segment_info, only_show=None), [
 				{'contents': '1: w1', 'highlight_groups': ['workspace']},
 				{'contents': '2: w2', 'highlight_groups': ['w_visible', 'workspace']},
 				{'contents': '3: w3', 'highlight_groups': ['w_urgent', 'w_visible', 'workspace']},
 				{'contents': '4: w4', 'highlight_groups': ['w_focused', 'w_urgent', 'w_visible', 'workspace']},
 			])
-			self.assertEqual(i3wm.workspaces(pl=pl, only_show=['focused', 'urgent']), [
+			self.assertEqual(i3wm.workspaces(pl=pl, segment_info=segment_info, only_show=['focused', 'urgent']), [
 				{'contents': '3: w3', 'highlight_groups': ['w_urgent', 'w_visible', 'workspace']},
 				{'contents': '4: w4', 'highlight_groups': ['w_focused', 'w_urgent', 'w_visible', 'workspace']},
 			])
-			self.assertEqual(i3wm.workspaces(pl=pl, only_show=['visible']), [
+			self.assertEqual(i3wm.workspaces(pl=pl, segment_info=segment_info, only_show=['visible']), [
 				{'contents': '2: w2', 'highlight_groups': ['w_visible', 'workspace']},
 				{'contents': '3: w3', 'highlight_groups': ['w_urgent', 'w_visible', 'workspace']},
 				{'contents': '4: w4', 'highlight_groups': ['w_focused', 'w_urgent', 'w_visible', 'workspace']},
 			])
-			self.assertEqual(i3wm.workspaces(pl=pl, only_show=['visible'], strip=3), [
+			self.assertEqual(i3wm.workspaces(pl=pl, segment_info=segment_info, only_show=['visible'], strip=3), [
 				{'contents': 'w2', 'highlight_groups': ['w_visible', 'workspace']},
 				{'contents': 'w3', 'highlight_groups': ['w_urgent', 'w_visible', 'workspace']},
 				{'contents': 'w4', 'highlight_groups': ['w_focused', 'w_urgent', 'w_visible', 'workspace']},
 			])
-			self.assertEqual(i3wm.workspaces(pl=pl, only_show=['focused', 'urgent'], output='DVI01'), [
+			self.assertEqual(i3wm.workspaces(pl=pl, segment_info=segment_info, only_show=['focused', 'urgent'], output='DVI01'), [
 				{'contents': '4: w4', 'highlight_groups': ['w_focused', 'w_urgent', 'w_visible', 'workspace']},
 			])
-			self.assertEqual(i3wm.workspaces(pl=pl, only_show=['visible'], output='HDMI1'), [
+			self.assertEqual(i3wm.workspaces(pl=pl, segment_info=segment_info, only_show=['visible'], output='HDMI1'), [
 				{'contents': '3: w3', 'highlight_groups': ['w_urgent', 'w_visible', 'workspace']},
 			])
-			self.assertEqual(i3wm.workspaces(pl=pl, only_show=['visible'], strip=3, output='LVDS1'), [
+			self.assertEqual(i3wm.workspaces(pl=pl, segment_info=segment_info, only_show=['visible'], strip=3, output='LVDS1'), [
 				{'contents': 'w2', 'highlight_groups': ['w_visible', 'workspace']},
+			])
+			segment_info['output'] = 'LVDS1'
+			self.assertEqual(i3wm.workspaces(pl=pl, segment_info=segment_info, only_show=['visible'], output='HDMI1'), [
+				{'contents': '3: w3', 'highlight_groups': ['w_urgent', 'w_visible', 'workspace']},
+			])
+			self.assertEqual(i3wm.workspaces(pl=pl, segment_info=segment_info, only_show=['visible'], strip=3), [
+				{'contents': 'w2', 'highlight_groups': ['w_visible', 'workspace']},
+			])
+
+	def test_workspace(self):
+		pl = Pl()
+		with replace_attr(i3wm, 'get_i3_connection', lambda: Args(get_workspaces=self.get_workspaces)):
+			segment_info = {}
+
+			self.assertEqual(i3wm.workspace(pl=pl, segment_info=segment_info, workspace='1: w1'), [
+				{'contents': '1: w1', 'highlight_groups': ['workspace']},
+			])
+			self.assertEqual(i3wm.workspace(pl=pl, segment_info=segment_info, workspace='3: w3', strip=True), [
+				{'contents': 'w3', 'highlight_groups': ['w_urgent', 'w_visible', 'workspace']},
+			])
+			self.assertEqual(i3wm.workspace(pl=pl, segment_info=segment_info, workspace='9: w9'), None)
+			self.assertEqual(i3wm.workspace(pl=pl, segment_info=segment_info), [
+				{'contents': '4: w4', 'highlight_groups': ['w_focused', 'w_urgent', 'w_visible', 'workspace']},
+			])
+			segment_info['workspace'] = next(self.get_workspaces())
+			self.assertEqual(i3wm.workspace(pl=pl, segment_info=segment_info, workspace='4: w4'), [
+				{'contents': '4: w4', 'highlight_groups': ['w_focused', 'w_urgent', 'w_visible', 'workspace']},
+			])
+			self.assertEqual(i3wm.workspace(pl=pl, segment_info=segment_info, strip=True), [
+				{'contents': 'w1', 'highlight_groups': ['workspace']},
 			])
 
 	def test_mode(self):
@@ -896,6 +998,45 @@ class TestI3WM(TestCase):
 		self.assertEqual(i3wm.mode(pl=pl, segment_info={'mode': 'test'}), 'test')
 		self.assertEqual(i3wm.mode(pl=pl, segment_info={'mode': 'default'}, names={'default': 'test'}), 'test')
 		self.assertEqual(i3wm.mode(pl=pl, segment_info={'mode': 'test'}, names={'default': 'test', 'test': 't'}), 't')
+
+	def test_scratchpad(self):
+		class Conn(object):
+			def get_tree(self):
+				return self
+			
+			def descendents(self):
+				nodes_unfocused = [Args(focused = False)]
+				nodes_focused = [Args(focused = True)]
+
+				workspace_scratch = lambda: Args(name='__i3_scratch')
+				workspace_noscratch = lambda: Args(name='2: www')
+				return [
+					Args(scratchpad_state='fresh', urgent=False, workspace=workspace_scratch, nodes=nodes_unfocused),
+					Args(scratchpad_state='changed', urgent=True, workspace=workspace_noscratch, nodes=nodes_focused),
+					Args(scratchpad_state='fresh', urgent=False, workspace=workspace_scratch, nodes=nodes_unfocused),
+					Args(scratchpad_state=None, urgent=False, workspace=workspace_noscratch, nodes=nodes_unfocused),
+					Args(scratchpad_state='fresh', urgent=False, workspace=workspace_scratch, nodes=nodes_focused),
+					Args(scratchpad_state=None, urgent=True, workspace=workspace_noscratch, nodes=nodes_unfocused),
+				]
+
+		pl = Pl()
+		with replace_attr(i3wm, 'get_i3_connection', lambda: Conn()):
+			self.assertEqual(i3wm.scratchpad(pl=pl), [
+				{'contents': 'O', 'highlight_groups': ['scratchpad']},
+				{'contents': 'X', 'highlight_groups': ['scratchpad:urgent', 'scratchpad:focused', 'scratchpad:visible', 'scratchpad']},
+				{'contents': 'O', 'highlight_groups': ['scratchpad']},
+				{'contents': 'X', 'highlight_groups': ['scratchpad:visible', 'scratchpad']},
+				{'contents': 'O', 'highlight_groups': ['scratchpad:focused', 'scratchpad']},
+				{'contents': 'X', 'highlight_groups': ['scratchpad:urgent', 'scratchpad:visible', 'scratchpad']},
+			])
+			self.assertEqual(i3wm.scratchpad(pl=pl, icons={'changed': '-', 'fresh': 'o'}), [
+				{'contents': 'o', 'highlight_groups': ['scratchpad']},
+				{'contents': '-', 'highlight_groups': ['scratchpad:urgent', 'scratchpad:focused', 'scratchpad:visible', 'scratchpad']},
+				{'contents': 'o', 'highlight_groups': ['scratchpad']},
+				{'contents': '-', 'highlight_groups': ['scratchpad:visible', 'scratchpad']},
+				{'contents': 'o', 'highlight_groups': ['scratchpad:focused', 'scratchpad']},
+				{'contents': '-', 'highlight_groups': ['scratchpad:urgent', 'scratchpad:visible', 'scratchpad']},
+			])
 
 
 class TestMail(TestCommon):
@@ -1271,6 +1412,30 @@ class TestVim(TestCase):
 					self.assertEqual(branch(segment_info=segment_info, status_colors=True, ignore_statuses=['U']), [
 						{'divider_highlight_group': 'branch:divider', 'highlight_groups': ['branch_clean', 'branch'], 'contents': 'foo'}
 					])
+
+	def test_stash(self):
+		pl = Pl()
+		create_watcher = get_fallback_create_watcher()
+		with vim_module._with('buffer', '/foo') as segment_info:
+			stash = partial(self.vim.stash, pl=pl, create_watcher=create_watcher, segment_info=segment_info)
+
+			def forge_stash(n):
+				return replace_attr(self.vcs, 'guess', get_dummy_guess(stash=lambda: n))
+
+			with forge_stash(0):
+				self.assertEqual(stash(), None)
+			with forge_stash(1):
+				self.assertEqual(stash(), [{
+					'divider_highlight_group': 'stash:divider',
+					'highlight_groups': ['stash'],
+					'contents': '1'
+				}])
+			with forge_stash(2):
+				self.assertEqual(stash(), [{
+					'divider_highlight_group': 'stash:divider',
+					'highlight_groups': ['stash'],
+					'contents': '2'
+				}])
 
 	def test_file_vcs_status(self):
 		pl = Pl()
