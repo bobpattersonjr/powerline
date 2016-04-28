@@ -8,12 +8,12 @@
             {
                 "function": "powerline.segments.common.sys.system_load",
                 "priority": 50
-            },
-                {
+            },           
+            {
                 "function":"powerline.segments.common.wthr.weather",
                 "args":{
-                "unit":"F",
-                "location_query":"Hoboken, NJ"
+                    "unit":"F",
+                    "location_query":"Hoboken, NJ"
                 }
             },
             {
