@@ -59,7 +59,7 @@ else:
 
 
 def get_version():
-	base_version = '2.4'
+	base_version = '2.7'
 	base_version += '.dev9999'
 	try:
 		return base_version + '+git.' + str(subprocess.check_output(['git', 'rev-parse', 'HEAD']).strip())
@@ -124,7 +124,7 @@ setup(
 	packages=find_packages(exclude=('tests', 'tests.*')),
 	include_package_data=True,
 	zip_safe=False,
-	install_requires=[],
+	install_requires=['argparse'] if OLD_PYTHON else [],
 	extras_require={
 		'docs': [
 			'Sphinx',
